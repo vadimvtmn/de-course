@@ -18,13 +18,29 @@ write_silver_partitioned():
 from __future__ import annotations
 
 import polars as pl
+import os
 
 from . import config
+from .utils import save_parquet
 
 
 def build_silver(bronze: pl.DataFrame) -> pl.DataFrame:
-    raise NotImplementedError("Завдання 2: реалізуйте silver згідно з CONTRACTS.md")
+    df = bronze.drop_nulls(subset=["repo_name", "event_id", "created_at"])
+
+    df = df.filter(
+        (pl.col("event_type").is_in(config.TARGET_EVENT_TYPES)) &
+        (pl.col("repo_name").str.strip_chars() != "")
+    )
+
+    df = df.unique(subset=["event_id"], keep="last")
+
+    save_parquet(df=df, path=config.SILVER_FILE)
+
+    print(f"[silver] saved {os.path.basename(config.SILVER_FILE)}")
+
+    return df
 
 
 def write_silver_partitioned(silver: pl.DataFrame) -> None:
-    raise NotImplementedError("Завдання 3: запишіть партиціонований silver за event_type")
+    save_parquet(df=silver, path=config.SILVER_PARTITIONED_DIR, partition_by=["event_type"])
+    print(f"[silver] saved {os.path.basename(config.SILVER_PARTITIONED_DIR)}")
