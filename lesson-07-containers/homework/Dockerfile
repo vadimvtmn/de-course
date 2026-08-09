@@ -14,3 +14,19 @@
 # Скрипт app/gh_ingest.py — ДАНО, не редагуйте його.
 
 # TODO: реалізуйте multi-stage Dockerfile тут.
+
+FROM python:3.12-slim
+
+RUN useradd --create-home --uid 1000 appuser
+
+WORKDIR /app 
+
+COPY app/gh_ingest.py app/requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN mkdir /cache && chown appuser:appuser /cache
+
+USER appuser
+
+ENTRYPOINT [ "python",  "gh_ingest.py"]
