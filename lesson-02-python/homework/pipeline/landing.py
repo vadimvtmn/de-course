@@ -7,10 +7,13 @@ file already present skips the download.
 
 from __future__ import annotations
 
+import logging
 import os
 import urllib.request
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 
 def land_raw_hour() -> str:
@@ -21,15 +24,15 @@ def land_raw_hour() -> str:
     """
     os.makedirs(config.LANDING_DIR, exist_ok=True)
     if os.path.exists(config.LANDING_FILE):
-        print(f"[landing] already present, skip: {os.path.basename(config.LANDING_FILE)}")
+        logger.info("already present, skip: %s", os.path.basename(config.LANDING_FILE))
         return config.LANDING_FILE
 
-    print(f"[landing] downloading {config.GH_URL} ...")
+    logger.info("downloading %s ...", config.GH_URL)
     # gharchive.org returns 403 to urllib's default User-Agent.
     req = urllib.request.Request(config.GH_URL, headers={"User-Agent": "de-course-l02/1.0"})
     with urllib.request.urlopen(req) as resp, open(config.LANDING_FILE, "wb") as out:
         while chunk := resp.read(1 << 20):
             out.write(chunk)
     size_mb = os.path.getsize(config.LANDING_FILE) / 1_000_000
-    print(f"[landing] saved {os.path.basename(config.LANDING_FILE)} ({size_mb:.0f} MB)")
+    logger.info("saved %s (%.0f MB)", os.path.basename(config.LANDING_FILE), size_mb)
     return config.LANDING_FILE

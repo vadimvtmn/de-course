@@ -18,10 +18,13 @@ write_silver_partitioned():
 from __future__ import annotations
 
 import polars as pl
+import logging
 import os
 
 from . import config
 from .utils import save_parquet
+
+logger = logging.getLogger(__name__)
 
 
 def build_silver(bronze: pl.DataFrame) -> pl.DataFrame:
@@ -36,11 +39,11 @@ def build_silver(bronze: pl.DataFrame) -> pl.DataFrame:
 
     save_parquet(df=df, path=config.SILVER_FILE)
 
-    print(f"[silver] saved {os.path.basename(config.SILVER_FILE)}")
+    logger.info("saved %s", os.path.basename(config.SILVER_FILE))
 
     return df
 
 
 def write_silver_partitioned(silver: pl.DataFrame) -> None:
     save_parquet(df=silver, path=config.SILVER_PARTITIONED_DIR, partition_by=["event_type"])
-    print(f"[silver] saved {os.path.basename(config.SILVER_PARTITIONED_DIR)}")
+    logger.info("saved %s", os.path.basename(config.SILVER_PARTITIONED_DIR))

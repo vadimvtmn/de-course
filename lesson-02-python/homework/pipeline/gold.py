@@ -13,10 +13,13 @@ TODO (Завдання 4, 5, 6): реалізуйте три функції ни
 from __future__ import annotations
 
 import polars as pl
+import logging
 import os
 
 from . import config
 from .utils import save_parquet
+
+logger = logging.getLogger(__name__)
 
 
 def build_repo_activity(silver: pl.DataFrame) -> pl.DataFrame:
@@ -34,7 +37,7 @@ def build_repo_activity(silver: pl.DataFrame) -> pl.DataFrame:
 
     save_parquet(df=df, path=config.GOLD_REPO_ACTIVITY)
 
-    print(f"[gold] saved {os.path.basename(config.GOLD_REPO_ACTIVITY)}")
+    logger.info("saved %s", os.path.basename(config.GOLD_REPO_ACTIVITY))
 
     return df
 
@@ -54,7 +57,7 @@ def build_activity_per_minute(silver: pl.DataFrame) -> pl.DataFrame:
 
     save_parquet(df=df, path=config.GOLD_ACTIVITY_PER_MINUTE)
 
-    print(f"[gold] saved {os.path.basename(config.GOLD_ACTIVITY_PER_MINUTE)}")
+    logger.info("saved %s", os.path.basename(config.GOLD_ACTIVITY_PER_MINUTE))
 
     return df
 
@@ -74,6 +77,6 @@ def build_push_commits_by_repo(silver: pl.DataFrame) -> pl.DataFrame:
 
     save_parquet(df=df, path=config.GOLD_PUSH_COMMITS)
 
-    print(f"[gold] saved {os.path.basename(config.GOLD_PUSH_COMMITS)}")
+    logger.info("saved %s", os.path.basename(config.GOLD_PUSH_COMMITS))
 
     return df
