@@ -14,3 +14,23 @@
 # Скрипт app/gh_ingest.py — ДАНО, не редагуйте його.
 
 # TODO: реалізуйте Dockerfile тут.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN useradd --create-home --uid 1000 appuser
+RUN mkdir /cache && chown appuser:appuser /cache
+
+WORKDIR /app
+
+COPY app/requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/gh_ingest.py ./
+
+USER appuser
+
+ENTRYPOINT ["python", "gh_ingest.py"]
