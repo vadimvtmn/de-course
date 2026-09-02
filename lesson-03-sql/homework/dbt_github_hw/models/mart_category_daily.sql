@@ -1,13 +1,18 @@
--- =====================================================================
--- TASK 6 — mart_category_daily (20 балів). Специфікація: ../../MODELS.md → «mart_category_daily».
--- Широка вітрина: multi-join stg_events + event_categories + calendar, агрегація по (день × категорія).
--- Контракт колонок нижче; заглушка повертає 0 рядків.
--- =====================================================================
-SELECT
-    NULL::DATE    AS event_date,
-    NULL::BOOLEAN AS is_weekend,
-    NULL::VARCHAR AS category,
-    NULL::BIGINT  AS events,
-    NULL::BIGINT  AS distinct_repos,
-    NULL::BIGINT  AS distinct_actors
-WHERE false  -- TODO: 3-way join + GROUP BY (event_date, is_weekend, category)
+WITH    events      AS ( SELECT * FROM {{ ref("stg_events") }} ),
+        categories  AS ( SELECT * FROM {{ ref("event_categories") }} ),
+        calendar    AS ( SELECT * FROM {{ ref("calendar") }} )
+
+    SELECT
+        e.event_date,
+        cal.is_weekend,
+        cat.category,
+        count(*)                        AS events,
+        count(DISTINCT e.repo_name)     AS distinct_repos,
+        count(DISTINCT e.actor_login)   AS distinct_actors
+    FROM events     AS e 
+    JOIN categories AS cat 
+        USING(event_type)
+    JOIN calendar   AS cal 
+        ON cal.day = e.event_date
+    GROUP BY e.event_date, cal.is_weekend, cat.category
+
