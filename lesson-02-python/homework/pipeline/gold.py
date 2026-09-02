@@ -13,17 +13,70 @@ TODO (Завдання 4, 5, 6): реалізуйте три функції ни
 from __future__ import annotations
 
 import polars as pl
+import logging
+import os
 
 from . import config
+from .utils import save_parquet
+
+logger = logging.getLogger(__name__)
 
 
 def build_repo_activity(silver: pl.DataFrame) -> pl.DataFrame:
-    raise NotImplementedError("Завдання 4: реалізуйте repo_activity згідно з CONTRACTS.md")
+    df = silver.group_by("repo_name").agg(
+        pl.len().alias("event_count"),
+        pl.col("event_type").n_unique().alias("distinct_event_types")
+    )
+
+    df = df.sort("event_count", descending=True)
+
+    df = df.with_columns(
+        pl.col("event_count").cast(pl.Int64),
+        pl.col("distinct_event_types").cast(pl.Int64)
+    )
+
+    save_parquet(df=df, path=config.GOLD_REPO_ACTIVITY)
+
+    logger.info("saved %s", os.path.basename(config.GOLD_REPO_ACTIVITY))
+
+    return df
 
 
 def build_activity_per_minute(silver: pl.DataFrame) -> pl.DataFrame:
-    raise NotImplementedError("Завдання 5: реалізуйте activity_per_minute згідно з CONTRACTS.md")
+    df = silver.with_columns(pl.col("created_at").dt.truncate("1m").alias("minute"))
+
+    df = df.group_by("minute").agg(
+        pl.len().alias("event_count")
+    )
+
+    df = df.sort("minute")
+
+    df = df.with_columns(
+        pl.col("event_count").cast(pl.Int64)
+    )
+
+    save_parquet(df=df, path=config.GOLD_ACTIVITY_PER_MINUTE)
+
+    logger.info("saved %s", os.path.basename(config.GOLD_ACTIVITY_PER_MINUTE))
+
+    return df
 
 
 def build_push_commits_by_repo(silver: pl.DataFrame) -> pl.DataFrame:
-    raise NotImplementedError("Завдання 6: реалізуйте push_commits_by_repo згідно з CONTRACTS.md")
+    df = silver.filter(pl.col("event_type")=="PushEvent")
+
+    df = df.group_by("repo_name").agg(
+        pl.len().alias("push_events"),
+        pl.col("commit_count").sum().alias("total_commits")
+    )
+
+    df = df.with_columns(
+        pl.col("push_events").cast(pl.Int64),
+        pl.col("total_commits").cast(pl.Int64)
+    )
+
+    save_parquet(df=df, path=config.GOLD_PUSH_COMMITS)
+
+    logger.info("saved %s", os.path.basename(config.GOLD_PUSH_COMMITS))
+
+    return df
