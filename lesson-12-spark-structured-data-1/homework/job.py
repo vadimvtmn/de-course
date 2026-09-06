@@ -15,9 +15,11 @@ from __future__ import annotations
 import logging
 import shutil
 
+from functools import reduce
+
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F  # noqa: F401  (знадобиться у ваших функціях)
-from pyspark.sql.types import StructType
+from pyspark.sql.types import StructType, StructField, StringType, BooleanType
 from pyspark.sql.window import Window  # noqa: F401  (для top_repos_per_type)
 
 LANDING_GLOB = "data/landing/*.json.gz"
@@ -43,7 +45,15 @@ def event_schema() -> StructType:
 
     SPEC.md → «Крок 1».
     """
-    raise NotImplementedError("Крок 1: event_schema")
+    return StructType([
+        StructField("id", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("actor", StructType([StructField("login", StringType(), True),]), True),
+        StructField("repo", StructType([StructField("name", StringType(), True),]), True),
+        StructField("public", BooleanType(), True),
+        StructField("created_at", StringType(), True),
+    ])
+ 
 
 
 def read_raw(spark: SparkSession) -> DataFrame:
@@ -54,37 +64,73 @@ def read_raw(spark: SparkSession) -> DataFrame:
 # ── Крок 2 — сплющення ────────────────────────────────────────────────────────
 def flatten(raw: DataFrame) -> DataFrame:
     """Розгорнути вкладені структури у пласкі колонки. SPEC.md → «Крок 2»."""
-    raise NotImplementedError("Крок 2: flatten")
+    return raw.select(
+        F.col("id").alias("event_id"),
+        F.col("type").alias("event_type"),
+        F.col("actor.login").alias("actor_login"),
+        F.col("repo.name").alias("repo_name"),
+        F.col("public").alias("public"),
+        F.to_timestamp("created_at").alias("created_at")
+    )
 
 
 # ── Крок 3 — очищення ─────────────────────────────────────────────────────────
 def clean(events: DataFrame) -> DataFrame:
     """Фільтри якості + дедуплікація. SPEC.md → «Крок 3»."""
-    raise NotImplementedError("Крок 3: clean")
+    filtered = events.where(
+        (F.col("event_type").isin(TARGET_EVENT_TYPES)) &
+        (F.col("public") == True) &
+        (F.col("event_id").isNotNull()) &
+        (F.col("repo_name").isNotNull()) &
+        (F.col("created_at").isNotNull())
+    )
+
+    w = Window.partitionBy("event_id").orderBy(F.col("created_at").desc())
+    dedup = filtered.withColumn("rn", F.row_number().over(w)).where("rn = 1").drop("rn")
+    return dedup
 
 
 # ── Крок 4 — похідні колонки ──────────────────────────────────────────────────
 def with_derived(events: DataFrame) -> DataFrame:
     """Додати repo_owner, is_bot, hour. SPEC.md → «Крок 4»."""
-    raise NotImplementedError("Крок 4: with_derived")
+    return events.withColumns({
+        "repo_owner": F.split("repo_name", "/").getItem(0),
+        "is_bot": F.when(F.col("actor_login").endswith("[bot]"), True).otherwise(False),
+        "hour": F.date_trunc("hour", F.col("created_at"))
+    })
 
 
 # ── Крок 5 — підсумки по власниках ────────────────────────────────────────────
 def owner_totals(events: DataFrame) -> DataFrame:
     """Агрегат: один рядок на repo_owner. SPEC.md → «Крок 5»."""
-    raise NotImplementedError("Крок 5: owner_totals")
+    return events.groupBy("repo_owner").agg(
+        F.count("*").alias("owner_events"),
+        F.count_distinct("repo_name").alias("owner_repos"),
+        F.sum(F.when(F.col("is_bot") == True, 1).otherwise(0)).alias("owner_bot_events")
+    )
 
 
 # ── Крок 6 — топ-N репозиторіїв у межах типу події ────────────────────────────
 def top_repos_per_type(events: DataFrame, n: int) -> DataFrame:
     """Топ-N репозиторіїв усередині кожного event_type. SPEC.md → «Крок 6»."""
-    raise NotImplementedError("Крок 6: top_repos_per_type")
+    df_agg = events.groupBy(["event_type", "repo_name"]).agg(F.count("*").alias("repo_event_count"))
+
+    w = Window.partitionBy(["event_type"]).orderBy(F.col("repo_event_count").desc(), F.col("repo_name").asc())
+    df_n_rnk = df_agg.withColumn("rank", F.row_number().over(w)).where(f"rank <= {n}")
+    return df_n_rnk
 
 
 # ── Крок 7 — збагачення топу підсумками власника ──────────────────────────────
 def enrich_top_repos(top_repos: DataFrame, owners: DataFrame) -> DataFrame:
     """LEFT JOIN топу з підсумками власників + частка. SPEC.md → «Крок 7»."""
-    raise NotImplementedError("Крок 7: enrich_top_repos")
+    top_repos_w_owner = top_repos.withColumn("repo_owner", F.split("repo_name", "/").getItem(0))
+    joined = top_repos_w_owner.join(owners, on="repo_owner", how="left").fillna(0, subset=["owner_events", "owner_repos"])
+    share = joined.withColumn("owner_share", F.round(F.try_divide(F.col("repo_event_count"), F.col("owner_events")), 4))
+
+    return share.select(
+        "event_type", "repo_name", "repo_owner", "repo_event_count", 
+        "rank", "owner_events", "owner_repos", "owner_share"
+    )
 
 
 # ── Крок 8 — один зріз підсумкової таблиці ────────────────────────────────────
@@ -93,19 +139,37 @@ def summary_slice(events: DataFrame, dimension: str) -> DataFrame:
 
     SPEC.md → «Крок 8».
     """
-    raise NotImplementedError("Крок 8: summary_slice")
+    return (
+        events.groupby(dimension) 
+        .agg(
+            F.count("*").alias("events"),
+            F.count_distinct("repo_name").alias("distinct_repos")
+        )
+        .withColumn("dimension", F.lit(dimension))
+        .withColumn("dimension_value", F.col(dimension).cast(StringType()))
+        .select("dimension", "dimension_value", "events", "distinct_repos")
+    )
 
 
 # ── Крок 9 — усі зрізи в одній таблиці ────────────────────────────────────────
 def build_summary(events: DataFrame, dimensions: list[str]) -> DataFrame:
     """Усі зрізи, зібрані в одну таблицю. SPEC.md → «Крок 9»."""
-    raise NotImplementedError("Крок 9: build_summary")
+    dfs = [summary_slice(events, dim) for dim in dimensions]
+    
+    return reduce(lambda df1, df2: df1.unionByName(df2), dfs)
 
 
 # ── Крок 10 — запис marts ─────────────────────────────────────────────────────
 def write_outputs(outputs: dict[str, tuple[DataFrame, str | None]]) -> None:
     """Записати кожен mart у data/output/<name>/. SPEC.md → «Крок 10»."""
-    raise NotImplementedError("Крок 10: write_outputs")
+    for name, (df, p_col) in outputs.items():
+        if p_col:
+            write = df.repartition(p_col).write.partitionBy(p_col)
+
+        else:
+            write = df.coalesce(1).write
+
+        write.mode("overwrite").parquet(f"{OUTPUT_DIR}/{name}")
 
 
 # ── Оркестрація (ДАНО) ────────────────────────────────────────────────────────
