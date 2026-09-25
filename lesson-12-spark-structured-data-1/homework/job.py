@@ -124,7 +124,7 @@ def top_repos_per_type(events: DataFrame, n: int) -> DataFrame:
 def enrich_top_repos(top_repos: DataFrame, owners: DataFrame) -> DataFrame:
     """LEFT JOIN топу з підсумками власників + частка. SPEC.md → «Крок 7»."""
     top_repos_w_owner = top_repos.withColumn("repo_owner", F.split("repo_name", "/").getItem(0))
-    joined = top_repos_w_owner.join(owners, on="repo_owner", how="left").fillna(0, subset=["owner_events", "owner_repos"])
+    joined = top_repos_w_owner.join(F.broadcast(owners), on="repo_owner", how="left").fillna(0, subset=["owner_events", "owner_repos"])
     share = joined.withColumn("owner_share", F.round(F.try_divide(F.col("repo_event_count"), F.col("owner_events")), 4))
 
     return share.select(
