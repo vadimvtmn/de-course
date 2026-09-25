@@ -2,6 +2,7 @@
 # Запуск із цієї директорії (homework/):  uv run python consumer.py
 import json
 import os
+import time
 
 from confluent_kafka import Consumer
 from icecream import ic
@@ -23,7 +24,11 @@ def update_counts(by_type: dict, by_repo: dict, event: dict) -> None:
       by_repo[repo_name]  += 1
     Ключі, яких ще немає, починаються з 0.
     """
-    raise NotImplementedError("Реалізуйте update_counts")
+    repo_name, event_type = event["repo_name"], event["event_type"]
+
+    by_type[event_type] = by_type.get(event_type, 0) + 1
+    by_repo[repo_name] = by_repo.get(repo_name, 0) + 1
+
 
 
 def top_repos(by_repo: dict, n: int = 5) -> list:
@@ -33,7 +38,12 @@ def top_repos(by_repo: dict, n: int = 5) -> list:
     від найбільшого до найменшого. Однакові лічильники впорядкуйте за іменем
     репозиторію (щоб результат був детермінованим).
     """
-    raise NotImplementedError("Реалізуйте top_repos")
+    sorted_repos = sorted(
+        by_repo.items(),
+        key=lambda item: (-item[1], item[0])
+    )
+
+    return [[name, count] for name, count in sorted_repos[:n]]
 
 
 def run_consumer() -> dict:
@@ -48,8 +58,52 @@ def run_consumer() -> dict:
        і запишіть його JSON у OUTPUT_PATH (створіть каталог через os.makedirs).
        Поверніть stats.
     """
-    raise NotImplementedError("Реалізуйте run_consumer")
+    by_type = {}
+    by_repo = {}
+    total = 0
+    idle_start = time.monotonic()
 
+    consumer = Consumer({
+        "bootstrap.servers": BOOTSTRAP_SERVERS,
+        "group.id": GROUP_ID,
+        "auto.offset.reset": "earliest",
+    })
+
+    consumer.subscribe([TOPIC])
+
+    try:
+        while True:
+            msg = consumer.poll(timeout=1.0)
+
+            if msg is None:
+                if time.monotonic() - idle_start >= IDLE_LIMIT_SECONDS:
+                    break
+                continue
+                
+            if msg.error():
+                continue
+
+            event = json.loads(msg.value())
+            update_counts(by_type=by_type, by_repo=by_repo, event=event)
+
+            total += 1
+            idle_start = time.monotonic()
+
+    finally:
+        consumer.close()
+
+    stats = {
+        "total": total,
+        "by_type": by_type,
+        "top_repos": top_repos(by_repo, 5),
+    }
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(stats, f, ensure_ascii=False, indent=2)
+
+    return stats
 
 if __name__ == "__main__":
     ic(run_consumer())
