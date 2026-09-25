@@ -43,7 +43,12 @@ def build_producer() -> Producer:
     BOOTSTRAP_SERVERS. Увімкніть idempotent producer (`enable.idempotence`) і
     `acks="all"`, щоб ретраї не створювали дублікатів.
     """
-    raise NotImplementedError("Реалізуйте build_producer")
+    producer = Producer({
+        "bootstrap.servers": BOOTSTRAP_SERVERS,
+        "acks": "all",
+        "enable.idempotence": True, 
+    })
+    return producer
 
 
 def run_producer() -> int:
@@ -58,7 +63,21 @@ def run_producer() -> int:
     5. Після кожного produce() викликайте producer.poll(0) (не блокуюче).
     6. Наприкінці producer.flush(30). Поверніть к-сть надісланих подій.
     """
-    raise NotImplementedError("Реалізуйте run_producer")
+    producer = build_producer()
+
+    for raw_event in iter_archive(ARCHIVE_URL, MAX_RAW):
+        if not event_filter(raw_event):
+            continue
+
+        event = flatten_event(raw_event)
+        producer.produce(
+            topic=TOPIC,
+            key=str(event["repo_name"]), 
+            value=json.dumps(event).encode("utf-8"),
+        )
+        producer.poll(0) 
+
+    producer.flush()
 
 
 if __name__ == "__main__":
